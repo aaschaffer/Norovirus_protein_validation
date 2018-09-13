@@ -1,0 +1,5 @@
+4
+polyprotein
+VP1
+VF1
+VP2
