@@ -9,7 +9,8 @@
 #        --input_blastx_directory <directory in which to find blastx summaries> \
 #        --input_accessions <list of accessions for which there are nucleotide predictions> \
 #        --input_protein_names <names of proteins> \
-#        --alignment tolerance <number of nucleotides> 
+#        --alignment_tolerance <number of nucleotides>
+#        --indel_tolerance <number of nucleotides> 
 #        --output_table <combined output table> \
 #        --output_directory <output directory for single accession summaries>
 
@@ -53,14 +54,15 @@ my $input_header_offset;       #index for columns inside loop
 my $output_header_offset;      #index for columns inside loop
 my @all_input_data;            #all the values in the input file in a two-dimensional array, where the first dimension is by accession
 my @all_output_data;           #all the values in the output table in a two-dimensional array, where the first dimension is by accession
-my $nucleotide_protein_tolerable_discrepancy;  #upper bound on the discrepancy between the nucleotide alignment endpoint and protein alignment endpoint tolerable for foosh  
-my $max_indel = 0;              #maximum length of an insertion or deletion in query
+my $nucleotide_protein_tolerable_discrepancy;  #upper bound on the discrepancy between the nucleotide alignment endpoint and protein alignment endpoint tolerable for foosh
+my $indel_tolerance;            #how large can an in-frame indel be before the sequence becomes ineligible for foosh
+
 
 #some constants
 my $num_generic_input_headers = 3;    #number of headers in the input table that are not specific to a protein
 my $num_specific_input_headers = 2;   #number of headers in the input table that are specific to each protein
 my $num_generic_output_headers = 4;   #number of headers in the output table that are not specific to a protein
-my $num_specific_output_headers = 11; #number of headers in the output table that are specific to each protein
+my $num_specific_output_headers = 12; #number of headers in the output table that are specific to each protein
 my $dividing_line = "\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\";    #used to make one output file easier to read
 my $FOOSH_COLUMN_INDEX = 2;                 # the index of the output column that has the foosh decision
 my $INDEL_COLUMN_INDEX = 3;                 # the index of the output column that has the longest indel
@@ -73,11 +75,12 @@ my $HEADER_OFFSET_STOP_NUC   = 2;
 my $HEADER_OFFSET_STOP_PROT  = 3;
 my $HEADER_OFFSET_INS        = 4;
 my $HEADER_OFFSET_DEL        = 5;
-my $HEADER_OFFSET_TRC        = 6;
-my $HEADER_OFFSET_FRAME      = 7;   #what is the frame of the alignment?
-my $HEADER_OFFSET_NTERM      = 8;   #does the alignment extend to the protein N-terminus? 
-my $HEADER_OFFSET_CTERM      = 9;   #does the alignment extend to the protein C-terminus?
-my $HEADER_OFFSET_STOP_CODON = 10;  #if the difference between nucleotide end and protein end is exactly 3, then is that because the three nucleotides encode a stop codon?
+my $HEADER_OFFSET_MAX_INDEL  = 6;
+my $HEADER_OFFSET_TRC        = 7;
+my $HEADER_OFFSET_FRAME      = 8;   #what is the frame of the alignment?
+my $HEADER_OFFSET_NTERM      = 9;   #does the alignment extend to the protein N-terminus? 
+my $HEADER_OFFSET_CTERM      = 10;   #does the alignment extend to the protein C-terminus?
+my $HEADER_OFFSET_STOP_CODON = 11;  #if the difference between nucleotide end and protein end is exactly 3, then is that because the three nucleotides encode a stop codon?
 
 
 
@@ -97,7 +100,8 @@ opt_Add("--input_nucleotide_table",             "string", undef,      1,    unde
 opt_Add("--input_blastx_directory",             "string", undef,      1,    undef, undef,   "input directory with blastx summaries",    "Directory name <s> of blastx summaries",        \%opt_HH, \@opt_order_A);
 opt_Add("--input_accessions",             "string", undef,      1,    undef, undef,   "input list of accessions to validate",          "File name <s> of accesions to validate",        \%opt_HH, \@opt_order_A);
 opt_Add("--input_protein_names",             "string", undef,      1,    undef, undef,   "input file of protein names",                "File name <s> of protein list",        \%opt_HH, \@opt_order_A);
-opt_Add("--tolerance",            "integer", undef,      1,    undef, undef,   "tolerance",                "Tolerance <n> of protein nucleotide discrepancy",        \%opt_HH, \@opt_order_A);
+opt_Add("--alignment_tolerance",            "integer", undef,      1,    undef, undef,   "tolerance for alignment discrepancy",                "Tolerance <n> of protein nucleotide discrepancy",        \%opt_HH, \@opt_order_A);
+opt_Add("--indel_tolerance",            "integer", undef,      1,    undef, undef,   "tolerance for in-frame indels",                "Tolerance <n> for in-frame indels",        \%opt_HH, \@opt_order_A);
 opt_Add("--output_table",            "string", undef,      1,    undef, undef,   "combined output table",                               "Name <s> of combined output table to create",         \%opt_HH, \@opt_order_A);
 opt_Add("--output_directory",            "string", undef,      1,    undef, undef,   "output directory with one output file per accession",  "Name <s> of directory with one output file per accession",         \%opt_HH, \@opt_order_A);
 
@@ -108,7 +112,8 @@ $usage      .= "\t--input_nucleotide_table <input nucleotide prediction table>  
 $usage      .= "\t--input_blastx_directory <directory in which to find blastx summaries> \\\n";
 $usage      .= "\t--input_accessions <list of accessions for which there are nucleotide predictions> \\\n";
 $usage      .= "\t--input_protein_names <names of proteins> \\\n";
-$usage      .= "\t--tolerance <protein nucleotide discrepancy tolerance> \\\n";
+$usage      .= "\t--alignment_tolerance <protein nucleotide discrepancy tolerance> \\\n";
+$usage      .= "\t--indel_tolerance <indel length tolerance> \\\n";
 $usage      .= "\t--output_table <combined output table>  \\\n";
 $usage      .= "\t--output_directory <output directory for single accession summaries> \n\n";
 $usage      .= "\nFor example:\n";
@@ -116,7 +121,8 @@ $usage      .= "compare_predictions.pl --input_nucleotide_table nucleotide_annot
 $usage      .= "--input_blastx_directory ../blastx ";
 $usage      .= "--input_accessions accessions.txt ";
 $usage      .= "--input_protein_names protein_names.txt ";
-$usage      .= "--tolerance 10 ";
+$usage      .= "--alignment_tolerance 5 ";
+$usage      .= "--indel_tolerance 27 ";
 $usage      .= "--output_table nucleotide_annotations_validation_table.txt ";
 $usage      .= "--output_directory single_accession_validation_files ";
 
@@ -128,7 +134,8 @@ my $options_okay =
 		'input_blastx_directory=s'     => \$GetOptions_H{"--input_blastx_directory"},				
 		'input_accessions=s'      => \$GetOptions_H{"--input_accessions"},		
 		'input_protein_namese=s'           => \$GetOptions_H{"--input_protein_names"},
-		'tolerance=n'           => \$GetOptions_H{"--tolerance"},				
+		'alignment_tolerance=n'           => \$GetOptions_H{"--alignment_tolerance"},
+		'indel_tolerance=n'           => \$GetOptions_H{"--indel_tolerance"},						
 		'output_table=s'                => \$GetOptions_H{"--output_table"},
 		'output_directory=s'           => \$GetOptions_H{"--output_directory"});
 
@@ -151,7 +158,8 @@ $input_predict_file      = opt_Get("--input_nucleotide_table", \%opt_HH);
 $input_blastx_directory  = opt_Get("--input_blastx_directory", \%opt_HH);
 $input_accessions_file   = opt_Get("--input_accessions", \%opt_HH);
 $input_names_file        = opt_Get("--input_protein_names", \%opt_HH);
-$nucleotide_protein_tolerable_discrepancy = opt_Get("--tolerance", \%opt_HH);
+$nucleotide_protein_tolerable_discrepancy = opt_Get("--alignment_tolerance", \%opt_HH);
+$indel_tolerance = opt_Get("--indel_tolerance", \%opt_HH);
 $output_table            = opt_Get("--output_table", \%opt_HH);
 $output_directory        = opt_Get("--output_directory", \%opt_HH);
 
@@ -161,7 +169,8 @@ if(! defined $input_predict_file)      { $errmsg .= "ERROR, --input_nucleotide_t
 if(! defined $input_blastx_directory)  { $errmsg .= "ERROR, --input_blastx_directory option not used.\n"; }
 if(! defined $input_accessions_file)   { $errmsg .= "ERROR, --input_accessions_file option not used.\n"; }
 if(! defined $input_names_file)        { $errmsg .= "ERROR, --input_names_file option not used.\n"; }
-if(! defined $nucleotide_protein_tolerable_discrepancy)        { $errmsg .= "ERROR, --tolerance option not used.\n"; }
+if(! defined $nucleotide_protein_tolerable_discrepancy)        { $errmsg .= "ERROR, --alignment_tolerance option not used.\n"; }
+if(! defined $indel_tolerance)        { $errmsg .= "ERROR, --indel_tolerance option not used.\n"; }
 if(! defined $output_table)            { $errmsg .= "ERROR, --output_file option not used.\n"; }
 if(! defined $output_directory)        { $errmsg .= "ERROR, --output_directory option not used.\n"; }
 
@@ -230,6 +239,7 @@ while(defined($nextline = <SUMMARY>)) {
 	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_STOP_PROT] = "NP";
 	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_INS] = "";
 	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_DEL] = "";
+	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_MAX_INDEL] = 0;	
 	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_TRC] = "";				     
     }
     $i++;
@@ -335,6 +345,8 @@ sub make_column_headers {
 	$column_headers_output[$local_num_headers_output] = $protein_names[$local_i] . "_ins_prot";
 	$local_num_headers_output++;
 	$column_headers_output[$local_num_headers_output] = $protein_names[$local_i] . "_del_prot";
+	$local_num_headers_output++;
+	$column_headers_output[$local_num_headers_output] = $protein_names[$local_i] . "_max_indel";
 	$local_num_headers_output++;				
 	$column_headers_output[$local_num_headers_output] = $protein_names[$local_i] . "_trc_prot";
 	$local_num_headers_output++;
@@ -482,31 +494,30 @@ sub output_decisions {
 		    }
 		    print VALIDATION "Does the query have in-frame insertions w.r.t. the RefSeq protein?\n";
 		    if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_INS] =~ /\d/) {
-			if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_INS] =~ /\+\d\d/) {
-			    print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_INS], and at least one of them is > 9 nt\n";
-			    #$all_output_data[$local_i][$FOOSH_COLUMN_INDEX] = "No";
-			    
-			}
-			else {
-			    print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_INS], but none of them is > 9 nt\n";					   
-			}
+			print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_INS]\n";
 		    }
 		    else {
 			print VALIDATION "Answer: No\n";			
 		    }
 		    print VALIDATION "Does the query have in-frame deletions w.r.t. the RefSeq protein?\n";
 		    if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_DEL] =~ /\d/) {
-			if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_DEL] =~ /\-\d\d/) {
-			    print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_DEL], and at least one of them is > 9 nt\n";
-			    #			    $all_output_data[$local_i][$FOOSH_COLUMN_INDEX] = "No";
-			    
-			}
-			else {
-			    print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_DEL], but none of them is > 9 nt\n";					   
-			}
+			    print VALIDATION "Answer: Yes, $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_DEL]\n";
 		    }
 		    else {
 			print VALIDATION "Answer: No\n";			
+		    }
+		    if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_MAX_INDEL] > $all_output_data[$local_i][$INDEL_COLUMN_INDEX]) {
+			$all_output_data[$local_i][$INDEL_COLUMN_INDEX] = $all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_MAX_INDEL];
+		    }
+		    if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_MAX_INDEL] > 0) {
+			print VALIDATION "Is the length of the longest in-frame indel for this RefSeq protein > $indel_tolerance ?\n";
+			if ($all_output_data[$local_i][$local_output_header_offset + $HEADER_OFFSET_MAX_INDEL] > $indel_tolerance) {
+			    print VALIDATION "Answer: Yes\n";
+			    $all_output_data[$local_i][$FOOSH_COLUMN_INDEX] = "No";
+			}
+			else {
+			    print VALIDATION "Answer: No\n";
+			}
 		    }
 		}
 		else {
@@ -602,7 +613,7 @@ sub process_blastx_summary_file {
 	}
 	if ($local_fields[0] eq "SLEN") {
 	    ($local_slen) = ($local_fields[1] =~ m/^(\d+)/);
-	}	    
+	}
 	if (1 == $local_hsp) {
 	    if ($local_fields[0] eq "INS") {
 		$local_i = $num_generic_output_headers + ($local_protein_index * $num_specific_output_headers) + $HEADER_OFFSET_INS;
@@ -613,13 +624,13 @@ sub process_blastx_summary_file {
 		$all_output_data[$local_accession_index][$local_i] = $local_fields[1];
 	    }
 	    if ($local_fields[0] eq "MAXIN") {
-		$local_i = $INDEL_COLUMN_INDEX;
+		$local_i = $num_generic_output_headers + ($local_protein_index * $num_specific_output_headers) + $HEADER_OFFSET_MAX_INDEL;
 		if ($local_fields[1] > $all_output_data[$local_accession_index][$local_i]) {
 		    $all_output_data[$local_accession_index][$local_i] = $local_fields[1];
 		}
 	    }
 	    if ($local_fields[0] eq "MAXDE") {
-		$local_i = $INDEL_COLUMN_INDEX;
+		$local_i = $num_generic_output_headers + ($local_protein_index * $num_specific_output_headers) + $HEADER_OFFSET_MAX_INDEL;
 		if ($local_fields[1] > $all_output_data[$local_accession_index][$local_i]) {
 		    $all_output_data[$local_accession_index][$local_i] = $local_fields[1];
 		}
