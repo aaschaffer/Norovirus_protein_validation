@@ -1,0 +1,1 @@
+NPV.pl --input_fasta noro.fsa   --input_dir classify_dir1  --refseq    029645  --protein_names protein_names3.txt --align_tolerance 5  --indel_tolerance 27  --output_dir . --keep
