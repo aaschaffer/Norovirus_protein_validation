@@ -43,6 +43,10 @@ my $blast_output_file_name;     #file to hold blast outputs from the farm script
 my $blast_summary_file_name;     #file to hold summary of blast outputs from the farm script 
 my $query_name;                 #full name of one query file
 my $num_proteins_in_reference;   #number of proteins in the reference genome
+my $njobs_finished;              #number of jobs finished
+my $minutes_to_wait = 30;       #number of minutes to wait
+my @ArrOutFiles;                 #array of .out files
+my @ArrErrFiles;                 #array of .out files         
 
 #########################################################
 # Command line and option processing using epn-options.pm
@@ -163,7 +167,7 @@ if(-e $qsub_script_name) {
 }
 for ($s = 0; $s < $count; $s++){
   ($output_prefix) = ($full_names[$s] =~m/(\S+)\.na/);    
-  $output_script_name = "$output_prefix" . "\.blastx" . "\.csh";
+  $output_script_name = "$output_prefix" . "\.blastx" . "\.sh";
   $blast_output_file_name = $directory . $output_prefix . ".results" . "$s" . "\.out"; 
   if(-e $output_script_name) { 
     my $file_to_print = $output_script_name;
@@ -189,7 +193,7 @@ run_command("blastdbcmd -info -db $db_name -dbtype prot >&  /dev/null", $be_verb
 # STEP 3: Create qsub script and individual job shell scripts
 #############################################################
 # create the common strings that get printed to all qsub commands
-$qsub_common_str = "\#!/bin/tcsh\n";
+$qsub_common_str = "\#!/bin/bash\n";
 $qsub_common_str .= "\#\$ -P unified\n";
 $qsub_common_str .= "\n";
 $qsub_common_str .= "\# list resource request options\n";
@@ -227,8 +231,10 @@ for ($s = 0; $s < $count; $s++){
     # output definition stderr and stdout files
     $blast_error_file_name = "blastrun_" . "$s" . "\.err";
     $blast_diagnostic_file_name = "blastrun_" . "$s" . "\.out";
+    $ArrErrFiles[$s] = $blast_error_file_name;
+    $ArrOutFiles[$s] = $blast_diagnostic_file_name;    
     print SCRIPT "\#define stderr file\n"; 
-    print SCRIPT "\#\$ -e $blast_error_file_name\.\$JOB_ID\n";
+    print SCRIPT "\#\$ -e $blast_error_file_name\n";
     print SCRIPT "\# define stdout file\n";
     print SCRIPT "\#\$ -o $blast_diagnostic_file_name\n";
 
@@ -238,8 +244,8 @@ for ($s = 0; $s < $count; $s++){
     $blast_summary_file_name = $output_prefix . "\.blastx" . "\.summary.txt"; 
     print SCRIPT "echo \"starting blastn\"\n\n";
     print SCRIPT "/usr/bin/blastx -query $query_name -db $db_name -seg no -num_descriptions $num_proteins_in_reference -num_alignments $num_proteins_in_reference -out $blast_output_file_name\n";
-    print SCRIPT "/panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/test2/parse_blastx.pl --input  $blast_output_file_name > $blast_summary_file_name\n";
-    print SCRIPT "\n";
+    print SCRIPT "/panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/repository/parse_blastx.pl --input  $blast_output_file_name > $blast_summary_file_name\n";
+    print SCRIPT "echo \"finished\"\n";    
     close(SCRIPT);
     
     # make the script executable
@@ -252,7 +258,9 @@ if(opt_Get("--wait", \%opt_HH)) {
 }
 else {
   run_command("$qsub_script_name", $be_verbose);
+  $njobs_finished = waitForFarmJobs(\@ArrOutFiles, \@ArrErrFiles, "finished", $minutes_to_wait, 1);
 }
+
 
 ################################################
 # List of subroutines:
@@ -291,3 +299,134 @@ sub make_adjusted_file_list {
     close(LOCAL_OUTPUT);
     return;
 }    
+
+#################################################################
+# Subroutine : waitForFarmJobs()
+# Incept:      EPN, Mon Feb 29 16:20:54 2016
+#              EPN, Wed Aug 31 09:07:05 2016 [moved from dnaorg_annotate.pl to dnaorg.pm]
+#
+# Purpose: Wait for jobs on the farm to finish by checking the final
+#          line of their output files (in @{$outfile_AR}) to see
+#          if the final line is exactly the string
+#          $finished_string. We'll wait a maximum of $nmin
+#          minutes, then return the number of jobs that have
+#          finished. If all jobs finish before $nmin minutes we
+#          return at that point.
+#
+#          A job is considered 'finished in error' if it outputs
+#          anything to its err file in @{$errfile_AR}. (We do not kill
+#          the job, although for the jobs we are monitoring with this
+#          subroutine, it should already have died (though we don't
+#          guarantee that in anyway).) If any jobs 'finish in error'
+#          this subroutine will continue until all jobs have finished
+#          or we've waited $nmin minutes and then it will cause the
+#          program to exit in error and output an error message
+#          listing the jobs that have 'finished in error'
+#
+#          When $do_errcheck is 1, this function considers any output
+#          written to stderr output files in @{$errfile_AR} to mean
+#          that the corresponding job has 'failed' and should be
+#          considered to have finished. When $do_errchecks is 0
+#          we don't look at the err files.
+#
+#
+# Arguments:
+#  $outfile_AR:      ref to array of output files that will be created by jobs we are waiting for
+#  $errfile_AR:      ref to array of err files that will be created by jobs we are waiting for if
+#                    any stderr output is created
+#  $finished_str:    string that indicates a job is finished e.g. "[ok]"
+#  $nmin:            number of minutes to wait
+#  $do_errcheck:     '1' to consider output to an error file a 'failure' of a job, '0' not to.
+# Returns:     Number of jobs (<= scalar(@{$outfile_AR})) that have
+#              finished.
+#
+# Dies: never.
+#
+#################################################################
+sub waitForFarmJobs {
+    my $sub_name = "waitForFarmJobs()";
+    my $nargs_expected = 5;
+    if(scalar(@_) != $nargs_expected) { printf STDERR ("ERROR, $sub_name entered with %d != %d input arguments.\n", scalar(@_), $nargs_expected); exit(1); }
+
+    my ($outfile_AR, $errfile_AR, $finished_str, $nmin, $do_errcheck, $FH_HR) = @_;
+
+   
+    my $njobs = scalar(@{$outfile_AR});
+    my $errjobs = scalar(@{$errfile_AR});
+    if($njobs != $errjobs) {
+	print "ERROR in $sub_name, number of elements in outfile array $njobs differ from number of jobs in errfile array $errjobs\n";
+    }
+    my @is_finished_A  = ();  # $is_finished_A[$i] is 1 if job $i is finished (either successfully or having failed), else 0
+    my @is_failed_A    = ();  # $is_failed_A[$i] is 1 if job $i has finished and failed (all failed jobs are considered
+                            # to be finished), else 0. We only use this array if the --errcheck option is enabled.
+    my $nfinished      = 0;   # number of jobs finished
+my $nfail          = 0;   # number of jobs that have failed
+  my $cur_sleep_secs = 5;  # number of seconds to wait between checks, we'll double this until we reach $max_sleep, every $doubling_secs seconds
+  my $doubling_secs  = 120; # number of seconds to wait before doublign $cur_sleep
+  my $max_sleep_secs = 120; # maximum number of seconds we'll wait between checks
+  my $secs_waited    = 0;   # number of total seconds we've waited thus far
+
+  # initialize @is_finished_A to all '0's
+  for(my $i = 0; $i < $njobs; $i++) {
+    $is_finished_A[$i] = 0;
+    $is_failed_A[$i] = 0;
+  }
+
+  my $keep_going = 1;  # set to 0 if all jobs are finished
+  while(($secs_waited < (($nmin * 60) + $cur_sleep_secs)) && # we add $cur_sleep so we check one final time before exiting after time limit is reached
+        ($keep_going)) {
+      # check to see if jobs are finished, every $cur_sleep seconds
+      sleep($cur_sleep_secs);
+      $secs_waited += $cur_sleep_secs;
+      if($secs_waited >= $doubling_secs) {
+	  $cur_sleep_secs *= 2;
+	  if($cur_sleep_secs > $max_sleep_secs) { # reset to max if we've exceeded it
+	      $cur_sleep_secs = $max_sleep_secs;
+	  }
+      }
+
+      for(my $i = 0; $i < $njobs; $i++) {
+	  if(! $is_finished_A[$i]) {
+	      if(-s $outfile_AR->[$i]) {
+		  my $final_line = `tail -n 1 $outfile_AR->[$i]`;
+		  chomp $final_line;
+		  if($final_line =~ m/\r$/) { chop $final_line; } # remove ^M if it exists
+		  if($final_line =~ m/\Q$finished_str\E/) {
+		      $is_finished_A[$i] = 1;
+		      $nfinished++;
+		  }
+	      }
+	      if(($do_errcheck) && (-s $errfile_AR->[$i])) { # errfile exists and is non-empty, this is a failure, even if we saw $finished_str above
+		  if(! $is_finished_A[$i]) {
+		      $nfinished++;
+		  }
+		  $is_finished_A[$i] = 1;
+		  $is_failed_A[$i] = 1;
+		  $nfail++;
+	      }
+	  }
+      }
+      # output update
+      my $min_print = $secs_waited / 60.;
+    printf("#\t%4d of %4d jobs finished (%.1f minutes spent waiting)\n", $nfinished, $njobs, $min_print);
+
+    if($nfinished == $njobs) {
+      # we're done break out of it
+      $keep_going = 0;
+    }
+  }
+
+  if($nfail > 0) {
+    # construct error message
+    my $errmsg = "ERROR in $sub_name, $nfail of $njobs finished in error (output to their respective error files).\n";
+    $errmsg .= "Specifically the jobs that were supposed to create the following output and err files:\n";
+    for(my $i = 0; $i < $njobs; $i++) {
+      if($is_failed_A[$i]) {
+        $errmsg .= "\t$outfile_AR->[$i]\t$errfile_AR->[$i]\n";
+      }
+    }
+    print $errmsg;
+  }
+  # if we get here we have no failures
+  return $nfinished;
+}      
