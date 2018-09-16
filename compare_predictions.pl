@@ -189,9 +189,6 @@ open(OUTPUT,  ">", $output_table)                or die "Cannot open 4 $output_t
 $num_proteins = read_protein_names();
 close(PROTEINS);
 ($num_headers_input, $num_headers_output) = make_column_headers($num_proteins);
-if ($DEBUG) {
-    print "Numbers of headers are $num_headers_input $num_headers_output\n";
-}
 
 $num_accessions = 0;
 while(defined($nextline = <ACCESSIONS>)) {
@@ -243,13 +240,6 @@ while(defined($nextline = <SUMMARY>)) {
 	$all_output_data[$i][$output_header_offset + $HEADER_OFFSET_TRC] = "";				     
     }
     $i++;
-}
-if ($DEBUG) {
-    print "Initial values of output table\n";
-    for ($j = 0; $j < $num_headers_output; $j++) {
-	print "$all_output_data[0][$j]\t"
-    }
-    print "\n";    
 }
 
 for ($i = 0; $i < $num_accessions; $i++) {
@@ -392,6 +382,9 @@ sub output_decisions {
     for ($local_i = 0; $local_i < $local_num_accessions; $local_i++) {    
 	$local_one_accession = $accessions_no_version[$local_i];
 	$local_summary_filename = $output_directory . $local_one_accession . ".validation.txt";
+	if ($DEBUG) {
+	    print "Reporting Q and A results in $local_summary_filename\n";
+	}
 	open(VALIDATION,  ">", $local_summary_filename)                or die "Cannot open 5 $local_summary_filename for output\n";
 	for ($local_j = 0; $local_j < $num_proteins; $local_j++) {
 	    if (0 != $local_j) {
@@ -593,9 +586,6 @@ sub process_blastx_summary_file {
 	@local_fields = split /\t/, $local_nextline;
 	if ($local_fields[0] eq "HDEF") {
 	    ($local_protein_accession,$local_matching_protein) = ($local_fields[1] =~ m/^(\S+)\s+(\S+)/);  #match first and second tokens
-	    if ($DEBUG) {
-		print "Found HDEF line for $local_matching_protein with accession $local_protein_accession\n";
-	    } 
 	    $local_protein_index = -1;
 	    for ($local_j = 0; $local_j < $num_proteins; $local_j++)   {
 		if ($protein_names[$local_j] eq $local_matching_protein) {
