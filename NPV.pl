@@ -229,7 +229,10 @@ output_progress_complete($start_secs, $desc_str, undef, *STDOUT);
 if (!$keep_mode) {
     unlink $temp_output_file1;
     unlink $temp_output_file2;
-    unlink $temp_output_file3;    
+    unlink $temp_output_file3;
+    chdir ".." ;
+    unlink <*.na>;
+    chdir $cwd;
 }
 
 
