@@ -1,0 +1,76 @@
+This file describes the program NPV.pl, which combines the steps for
+Norovirus protein validation into one script, which needs to be run separetly
+for each RefSeq that has one or more sequences assigned to it.
+
+All relevant files can be found in directory
+/panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/repository
+The most important files there for later in this README file are:
+NPV.pl
+NPV_run_001959
+NPV_run_008311
+NPV_run_029645
+NPV_run_029646
+NPV_run_029647
+NPV_run_031324
+
+The files whose names start with NPV_run are shell scripts that run Norovirus
+protein validation for all sequences assigned to the corresponding RefSeq.
+
+The program assumes that the data are arranged in three levels of directories.
+The suggested nomenclature is
+Norovirus_proteins/test1/classification
+Norovirus_proteins/test2/classification
+Norovirus_proteins/test3/classification
+Norovirus_proteins/test4/classification
+
+and so on, but any names can be used. The examples below use the suggested nomenclature.
+
+The intention is that the upper level directory is created once for all time
+and stores the 18 blast database files only:
+
+001959db.phr  008311db.phr  029645db.phr  029646db.phr  029647db.phr  031324db.phr
+001959db.pin  008311db.pin  029645db.pin  029646db.pin  029647db.pin  031324db.pin
+001959db.psq  008311db.psq  029645db.psq  029646db.psq  029647db.psq  031324db.psq
+
+Each time a new test set is ready, one should create a new second level directory
+under Norovirus_proteins and a new third level directory under that.
+
+For example if an eighth test set is ready, one would do:
+cd Norovirus_proteins
+mkdir test8
+cd test8
+cd classification
+
+All the subsequent commands are issued from the third level subdirectory.
+Put in that subdirectory the FASTA-formatted file with the new sequences.
+In the examples below, we call this file noro.fsa, but it can have any name.
+Sequence dentifiers are assumed to be alphanumeric (no vertical bars) adjacent to the >.
+
+Run danorg_classify as usual; e.g.
+
+dnaorg_classify.pl  -A /panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/virseqannot/dnaorg-build-directories/norovirus-builds --dirbuild /panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/virseqannot/dnaorg-build-directories/norovirus-builds --dirout classify_dir1 --infasta noro.fa
+
+It will be important to keep track of the name used for the --dirout argument
+and to take note of which ones of the six Norovirus RefSeqs had any new sequences assigned to them.
+
+cp /panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/repository/NPV.pl .
+
+putting a copy of the program NPV.pl in directory
+Norovirus_proteins/test8/classification
+
+Next copy the relevant NPV-run files.
+For example, if sequences were assigned to NC_029646 and NC_031324 (but not the other four RefSeqs, then
+cp /panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/repository/NPV_run_029646 .
+cp /panfs/pan1.be-md.ncbi.nlm.nih.gov/dnaorg/2018.02/Norovirus_proteins/repository/NPV_run_031324 .
+
+If one used something other than the token classify_dir1 for the --dirout flag in the call to dnaorg_classify.pl, then that
+token should be replaced in the copied NPV_run_ files.
+Similarly, if one used somehing other than the name noro.fsa for the sequence file name, then that file name
+should be replaced in the NPV_run files.
+If one used classify_dir1, then the script files are ready to be used.
+After editing, if necessary, run the script files one at a time with no arguments.
+E.g,
+NPV_run_029646
+NPV_run_031324 
+
+Send questions to eric.nawrocki@nih.gov and alejandro.schaffer@nih.gov
